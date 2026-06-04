@@ -12,7 +12,7 @@ const categories = [
 
 export default function PolicySidebar() {
   return (
-    <aside className="space-y-4">
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       {/* Main limits card */}
       <div className="rounded-xl border border-white/8 bg-white/3 p-4">
         <h3 className="text-xs font-semibold uppercase tracking-widest text-white/40 mb-3">
@@ -93,7 +93,7 @@ export default function PolicySidebar() {
           <li>• Attach original bills with stamps</li>
         </ul>
       </div>
-    </aside>
+    </div>
   );
 }
 

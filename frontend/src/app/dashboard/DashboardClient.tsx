@@ -35,8 +35,8 @@ export default function DashboardClient({ userId }: DashboardClientProps) {
             </p>
           </div>
 
-          <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
-            {/* ── Left column: upload + results ── */}
+          <div className="mx-auto max-w-5xl space-y-8">
+            {/* ── Main content: upload + results ── */}
             <div className="space-y-6">
               {/* Upload card — hide when showing results */}
               {state !== "success" && (
@@ -88,7 +88,7 @@ export default function DashboardClient({ userId }: DashboardClientProps) {
               )}
             </div>
 
-            {/* ── Right column: policy sidebar ── */}
+            {/* ── Bottom cards: policy info ── */}
             <PolicySidebar />
           </div>
 

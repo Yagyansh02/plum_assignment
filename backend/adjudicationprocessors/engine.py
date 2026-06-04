@@ -17,6 +17,14 @@ import re
 from datetime import date, datetime, timedelta
 from typing import List, Optional, Tuple
 
+from constants import (
+    ADMIN_FALLBACK_KEYWORDS,
+    CONDITION_WAITING_PERIODS,
+    EXCLUSION_KEYWORDS,
+    HIGH_VALUE_THRESHOLD,
+    PREAUTH_MIN_AMOUNT,
+    PREAUTH_TESTS,
+)
 from entities.schemas import (
     ClaimInputEntity,
     DecisionEnum,
@@ -42,42 +50,6 @@ ANNUAL_LIMIT: float = POLICY["coverage_details"]["annual_limit"]
 PER_CLAIM_LIMIT: float = POLICY["coverage_details"]["per_claim_limit"]
 MIN_CLAIM_AMOUNT: float = POLICY["claim_requirements"]["minimum_claim_amount"]
 SUBMISSION_DEADLINE_DAYS: int = POLICY["claim_requirements"]["submission_timeline_days"]
-HIGH_VALUE_THRESHOLD: float = 25_000.0  # From adjudication_rules.md "Special Scenarios"
-
-# Normalised exclusion keywords derived from the policy exclusions list.
-# Using keywords instead of full phrases so partial matches work reliably.
-EXCLUSION_KEYWORDS: List[str] = [
-    "cosmetic",
-    "weight loss",
-    "bariatric",
-    "obesity",  # Weight-loss bucket
-    "infertility",
-    "ivf",
-    "experimental",
-    "self-inflicted",
-    "adventure sports",
-    "hiv",
-    "aids",
-    "alcohol",
-    "drug abuse",
-    "lasik",  # Vision exclusion
-    "whitening",  # Dental cosmetic
-    "botox",
-    "filler",
-    "rhinoplasty",
-    "liposuction",
-]
-
-# Maps diagnosis keywords → (policy key, sub-key or None)
-CONDITION_WAITING_PERIODS: dict = {
-    "diabetes": ("specific_ailments", "diabetes"),
-    "hypertension": ("specific_ailments", "hypertension"),
-    "joint replacement": ("specific_ailments", "joint_replacement"),
-}
-
-# Tests that always require pre-authorisation
-PREAUTH_TESTS: List[str] = ["mri", "ct scan", "ct-scan", "computed tomography"]
-PREAUTH_MIN_AMOUNT: float = 10_000.0  # Pre-auth only enforced above this threshold
 
 
 # ---------------------------------------------------------------------------
@@ -175,9 +147,6 @@ def _check_waiting_period(claim: ClaimInputEntity) -> Optional[Tuple[str, str]]:
 
 def _check_exclusions(
     diagnosis: str,
-    procedures: List[str],
-    treatment: str,
-    medicines: List[str],
 ) -> Optional[str]:
     """
     Returns 'SERVICE_NOT_COVERED' if an exclusion keyword is found in the
@@ -328,17 +297,6 @@ def _compute_approved_amount(
         approved += eligible_pharma
 
     # ── 4. Itemized ledger — handle mixed covered/excluded line items ──────
-    ADMIN_FALLBACK_KEYWORDS = [
-        "gst",
-        "tax",
-        "sub total",
-        "subtotal",
-        "grand total",
-        "total",
-        "cgst",
-        "sgst",
-    ]
-
     for item in bill.itemized_bill:
         item_lower = item.item_name.lower()
 
@@ -346,6 +304,10 @@ def _compute_approved_amount(
         if item.category == "ADMIN_TAXES" or any(
             kw in item_lower for kw in ADMIN_FALLBACK_KEYWORDS
         ):
+            if "total" not in item_lower: 
+                    notes.append(
+                        f"'{item.item_name}' (₹{item.amount:,.0f}) is non-reimbursable (Taxes/Admin fees)."
+                    )
             continue
 
         elif item.category == "COSMETIC_EXCLUDED":
@@ -530,12 +492,7 @@ def evaluate_policy_rules(claim: ClaimInputEntity) -> dict:
     # ═══════════════════════════════════════════════════════════════════════
     # STEP 3 — Coverage verification
     # ═══════════════════════════════════════════════════════════════════════
-    exclusion_hit = _check_exclusions(
-        diagnosis=prescription.diagnosis or "",
-        procedures=prescription.procedures or [],
-        treatment=prescription.treatment or "",
-        medicines=prescription.medicines_prescribed or [],
-    )
+    exclusion_hit = _check_exclusions(diagnosis=prescription.diagnosis or "")
 
     if exclusion_hit:
         return {
@@ -549,22 +506,6 @@ def evaluate_policy_rules(claim: ClaimInputEntity) -> dict:
             ),
             "next_steps": "Review the policy exclusions list. Contact HR if you believe this is an error.",
         }
-
-    # Per-claim limit check — must fire on the raw claim amount, not the
-    # post-deduction payout (a ₹6,000 claim is still over-limit even if
-    # sub-limits bring the approved payout to ₹4,800).
-    # if claim.claim_amount > PER_CLAIM_LIMIT:
-    #     return {
-    #         "decision": DecisionEnum.REJECTED,
-    #         "approved_amount": 0.0,
-    #         "rejection_reasons": ["PER_CLAIM_EXCEEDED"],
-    #         "confidence_score": 0.98,
-    #         "notes": (
-    #             f"Claim amount ₹{claim.claim_amount:,.0f} exceeds the per-claim limit "
-    #             f"of ₹{PER_CLAIM_LIMIT:,.0f}."
-    #         ),
-    #         "next_steps": "Contact support to check if your plan includes corporate buffer extensions.",
-    #     }
 
     # ═══════════════════════════════════════════════════════════════════════
     # STEP 4 — Amount calculation (sub-limits, co-pays, discounts)

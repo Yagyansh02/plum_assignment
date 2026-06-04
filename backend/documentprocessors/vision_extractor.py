@@ -19,6 +19,7 @@ import google.generativeai as genai
 from dotenv import load_dotenv
 from PIL import Image, ImageEnhance
 
+from constants import GEMINI_MODEL_NAME, MAX_RETRIES, RETRY_DELAYS, SYSTEM_PROMPT
 from entities.schemas import (
     ClaimInputEntity,
     DocumentAttachments,
@@ -39,38 +40,6 @@ if not _api_key:
     )
 
 genai.configure(api_key=_api_key)
-
-_MODEL_NAME = "gemini-2.5-flash"
-
-# ---------------------------------------------------------------------------
-# Prompt engineering
-# ---------------------------------------------------------------------------
-
-_SYSTEM_PROMPT = """\
-You are a clinical data extraction specialist for Plum Insurance (India).
-You will receive one or more images that together constitute a single OPD claim
-submission — they may include a prescription, a medical bill, lab reports,
-or a pharmacy receipt.
-
-YOUR TASK
-Analyse ALL images together and return a single JSON object that strictly
-follows the provided schema.
-
-STRICT RULES
-1. Only extract information that is clearly visible in the images.
-   Do NOT invent, infer, or guess any value.
-2. If a field is not visible, output null (for strings/booleans) or 0.0
-   (for numeric fields).
-3. Dates must be returned in ISO format: YYYY-MM-DD.
-   Convert "15 Oct 2024" → "2024-10-15", "15/10/2024" → "2024-10-15", etc.
-4. Doctor registration numbers must be copied exactly as printed
-   (e.g. "KA/45678/2015" or "AYUR/KL/2345/2019"). Do not reformat them.
-5. Amount fields must be plain numbers without currency symbols or commas
-   (e.g. 1500.00, not "₹1,500").
-6. Lists (medicines, procedures, tests) should be arrays of plain strings.
-   Each element should be one item — do not concatenate multiple items.
-7. Return ONLY the JSON object. No markdown fences, no preamble, no explanation.
-"""
 
 # ---------------------------------------------------------------------------
 # Image Pre-Processing (Enhancement)
@@ -102,14 +71,11 @@ def _enhance_image_for_llm(img_bytes: bytes) -> bytes:
 # Retry wrapper for free-tier rate limits
 # ---------------------------------------------------------------------------
 
-_MAX_RETRIES = 3
-_RETRY_DELAYS = [2, 5, 15]
-
 
 def _call_gemini_with_retry(
     model: genai.GenerativeModel, contents: list
 ) -> Optional[str]:
-    for attempt, delay in enumerate(([0] + _RETRY_DELAYS)[: _MAX_RETRIES + 1]):
+    for attempt, delay in enumerate(([0] + RETRY_DELAYS)[: MAX_RETRIES + 1]):
         if delay:
             logger.info(
                 "Rate-limit back-off: waiting %ds before retry %d…", delay, attempt
@@ -127,9 +93,9 @@ def _call_gemini_with_retry(
             return response.text
         except Exception as exc:
             logger.warning(
-                "Gemini call failed (attempt %d/%d): %s", attempt + 1, _MAX_RETRIES, exc
+                "Gemini call failed (attempt %d/%d): %s", attempt + 1, MAX_RETRIES, exc
             )
-            if attempt == _MAX_RETRIES:
+            if attempt == MAX_RETRIES:
                 logger.error("All Gemini retries exhausted.")
                 return None
     return None
@@ -147,10 +113,10 @@ def extract_claim_from_images(
     previous_claims_same_day: int = 0,
 ) -> ClaimInputEntity:
 
-    model = genai.GenerativeModel(_MODEL_NAME)
+    model = genai.GenerativeModel(GEMINI_MODEL_NAME)
 
     schema_json = json.dumps(RawGeminiExtraction.model_json_schema(), indent=2)
-    prompt = _SYSTEM_PROMPT + schema_json
+    prompt = SYSTEM_PROMPT + schema_json
 
     contents: list = [prompt]
 
