@@ -3,7 +3,7 @@ from typing import List
 from pydantic import BaseModel
 from datetime import datetime
 
-# Database imports matching your new structure
+# Database imports
 from sqlmodel import Session, select, func
 from database.db import get_session, Member, ClaimRecord
 
@@ -16,7 +16,6 @@ from adjudicationprocessors.engine import evaluate_policy_rules
 router = APIRouter()
 
 
-# Schema for incoming raw text requests from the frontend
 class UnstructuredClaimRequest(BaseModel):
     raw_text: str
 
@@ -39,81 +38,93 @@ async def adjudicate_text_claim(payload: UnstructuredClaimRequest):
 
 @router.post("/adjudicate/documents", summary="Process Medical Images with DB State")
 async def adjudicate_image_claim(
-    member_id: str = Form(...),
+    member_id: str = Form(...),  # 1. Accept the Clerk ID from Next.js
     files: List[UploadFile] = File(...),
     db: Session = Depends(get_session),
 ):
     try:
-        # 1. Read files
-        image_data = [(await file.read(), file.content_type) for file in files]
-        if not image_data:
-            raise ValueError("No files were uploaded.")
-
-        # 2. Extract Data via Gemini Vision (Stateless)
-        extracted_data = extract_claim_from_images(image_data)
-
-        # --- DATABASE HYDRATION & CONCURRENCY LOCK ---
-        member_id = extracted_data.member_id
-
-        # Lock the row to prevent "Double Spend" race conditions during simultaneous API calls
+        # 2. Row-Level Lock on the Member FIRST (Prevents race conditions)
         member = db.get(Member, member_id, with_for_update=True)
-
         if not member:
             return {
                 "status": "success",
-                "extracted_fields": extracted_data.model_dump(),
                 "adjudication_results": {
                     "decision": DecisionEnum.MANUAL_REVIEW,
                     "approved_amount": 0.0,
                     "flags": ["MEMBER_NOT_FOUND"],
-                    "notes": f"Member ID {member_id} not found in active policy database.",
+                    "notes": f"Member ID {member_id} not found in database. Did you seed the DB with your Clerk ID?",
+                    "next_steps": "Please verify your account status.",
                 },
             }
 
-        # 3. Dynamic SQL Aggregations
-        # A. Calculate YTD Claimed Amount safely from the DB ledger
-        try:
-            treatment_year = datetime.strptime(
-                extracted_data.treatment_date, "%Y-%m-%d"
-            ).year
-        except ValueError:
-            treatment_year = datetime.now().year
+        # 3. Read files
+        image_data = [(await file.read(), file.content_type) for file in files]
+        if not image_data:
+            db.rollback()
+            raise ValueError("No files were uploaded.")
 
+        # 4. Extract Data via Gemini
+        # We pass the verified DB member.id safely into the extractor!
+        extracted_data = extract_claim_from_images(image_data, member_id=member.id)
+
+        # 5. DUPLICATE CLAIM PREVENTION (Fraud Check)
+        try:
+            treatment_date_obj = datetime.strptime(
+                extracted_data.treatment_date, "%Y-%m-%d"
+            ).date()
+        except ValueError:
+            treatment_date_obj = datetime.now().date()
+
+        duplicate_check_stmt = select(ClaimRecord).where(
+            ClaimRecord.member_id == member.id,
+            ClaimRecord.treatment_date == treatment_date_obj,
+            ClaimRecord.raw_claim_amount == extracted_data.claim_amount,
+        )
+        duplicate_claim = db.exec(duplicate_check_stmt).first()
+
+        if duplicate_claim:
+            db.rollback()  # Release the row lock early
+            return {
+                "status": "success",
+                "extracted_fields": extracted_data.model_dump(),
+                "adjudication_results": {
+                    "decision": DecisionEnum.REJECTED,
+                    "approved_amount": 0.0,
+                    "rejection_reasons": ["DUPLICATE_CLAIM"],
+                    "confidence_score": 1.0,
+                    "notes": f"A claim for ₹{extracted_data.claim_amount} on {treatment_date_obj} has already been submitted.",
+                    "next_steps": "Do not submit the same documents twice.",
+                },
+            }
+
+        # 6. Dynamic SQL Aggregations (YTD Limit)
         ytd_stmt = select(
             func.coalesce(func.sum(ClaimRecord.approved_amount), 0.0)
         ).where(
-            ClaimRecord.member_id == member_id,
+            ClaimRecord.member_id == member.id,
             ClaimRecord.status.in_([DecisionEnum.APPROVED, DecisionEnum.PARTIAL]),
-            func.extract("year", ClaimRecord.treatment_date) == treatment_year,
+            func.extract("year", ClaimRecord.treatment_date) == treatment_date_obj.year,
         )
         calculated_ytd = db.exec(ytd_stmt).one()
 
-        # B. Calculate Frequency Anomaly (Same Day Claims)
         freq_stmt = select(func.count(ClaimRecord.id)).where(
-            ClaimRecord.member_id == member_id,
+            ClaimRecord.member_id == member.id,
             ClaimRecord.treatment_date == extracted_data.treatment_date,
         )
         same_day_claims = db.exec(freq_stmt).one()
 
-        # 4. Inject Verified DB State into the Claim Entity
+        # 7. Inject Verified DB State into the Claim Entity
         extracted_data.member_join_date = str(member.join_date)
         extracted_data.ytd_claimed_amount = float(calculated_ytd)
         extracted_data.previous_claims_same_day = int(same_day_claims)
 
-        # 5. Execute Deterministic Rule Engine
+        # 8. Execute Deterministic Rule Engine
         adjudication_output = evaluate_policy_rules(extracted_data)
 
-        # 6. Save the Audit Trail to the Database
-        try:
-            parsed_treatment_date = datetime.strptime(
-                extracted_data.treatment_date, "%Y-%m-%d"
-            ).date()
-        except ValueError:
-            parsed_treatment_date = datetime.now().date()
-
+        # 9. Save the Audit Trail to the Database
         new_claim_record = ClaimRecord(
             member_id=member.id,
-            treatment_date=parsed_treatment_date,
+            treatment_date=treatment_date_obj,
             submission_date=datetime.now().date(),
             status=adjudication_output["decision"],
             raw_claim_amount=extracted_data.claim_amount,
@@ -133,4 +144,5 @@ async def adjudicate_image_claim(
 
     except Exception as e:
         db.rollback()  # Safely release the DB lock on failure
+        raise HTTPException(status_code=500, detail=f"Pipeline failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Pipeline failed: {str(e)}")

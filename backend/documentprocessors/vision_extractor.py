@@ -40,14 +40,12 @@ if not _api_key:
 
 genai.configure(api_key=_api_key)
 
-# Pinned to the stable free-tier model.
 _MODEL_NAME = "gemini-2.5-flash"
 
 # ---------------------------------------------------------------------------
 # Prompt engineering
 # ---------------------------------------------------------------------------
 
-# Note: The word 'SCHEMA' was removed here since we pass it natively now.
 _SYSTEM_PROMPT = """\
 You are a clinical data extraction specialist for Plum Insurance (India).
 You will receive one or more images that together constitute a single OPD claim
@@ -80,26 +78,19 @@ STRICT RULES
 
 
 def _enhance_image_for_llm(img_bytes: bytes) -> bytes:
-    """
-    Applies contrast and sharpness filters to medical documents
-    to improve Gemini's OCR accuracy on blurry or faded text.
-    """
     try:
         image = Image.open(io.BytesIO(img_bytes))
-
         if image.mode != "RGB":
             image = image.convert("RGB")
 
         enhancer = ImageEnhance.Contrast(image)
         image = enhancer.enhance(1.5)
-
         enhancer = ImageEnhance.Sharpness(image)
         image = enhancer.enhance(2.0)
 
         output = io.BytesIO()
         image.save(output, format="JPEG")
         return output.getvalue()
-
     except Exception as e:
         logger.warning(
             f"Image enhancement failed, falling back to original. Error: {e}"
@@ -112,13 +103,12 @@ def _enhance_image_for_llm(img_bytes: bytes) -> bytes:
 # ---------------------------------------------------------------------------
 
 _MAX_RETRIES = 3
-_RETRY_DELAYS = [2, 5, 15]  # seconds between retries (exponential back-off)
+_RETRY_DELAYS = [2, 5, 15]
 
 
 def _call_gemini_with_retry(
     model: genai.GenerativeModel, contents: list
 ) -> Optional[str]:
-    """Calls Gemini with simple retry logic. Returns raw response text or None."""
     for attempt, delay in enumerate(([0] + _RETRY_DELAYS)[: _MAX_RETRIES + 1]):
         if delay:
             logger.info(
@@ -126,11 +116,12 @@ def _call_gemini_with_retry(
             )
             time.sleep(delay)
         try:
+            # FIX: Using JSON Mode (response_mime_type) without response_schema
+            # to prevent Protobuf "Unknown field for Schema: default" crashes.
             response = model.generate_content(
                 contents,
                 generation_config=genai.GenerationConfig(
-                    response_mime_type="application/json",
-                    response_schema=RawGeminiExtraction,  # Using Native Structured Outputs!
+                    response_mime_type="application/json"
                 ),
             )
             return response.text
@@ -155,17 +146,14 @@ def extract_claim_from_images(
     ytd_claimed_amount: float = 0.0,
     previous_claims_same_day: int = 0,
 ) -> ClaimInputEntity:
-    """
-    Extract claim data from a list of (image_bytes, mime_type) tuples and
-    return a fully-populated ClaimInputEntity ready for the adjudication engine.
-    """
-    model = genai.GenerativeModel(_MODEL_NAME)
-    prompt = _SYSTEM_PROMPT
 
-    # Build multimodal content list: text prompt + image parts
+    model = genai.GenerativeModel(_MODEL_NAME)
+
+    schema_json = json.dumps(RawGeminiExtraction.model_json_schema(), indent=2)
+    prompt = _SYSTEM_PROMPT + schema_json
+
     contents: list = [prompt]
 
-    # Run uploaded images through the PIL Enhancer
     for img_bytes, mime_type in image_uploads:
         if mime_type.startswith("image/"):
             enhanced_bytes = _enhance_image_for_llm(img_bytes)
@@ -176,18 +164,12 @@ def extract_claim_from_images(
 
         contents.append({"mime_type": final_mime_type, "data": enhanced_bytes})
 
-    # Call LLM (Native JSON parsing guarantees correctness now)
     raw_text = _call_gemini_with_retry(model, contents)
 
     if raw_text is None:
-        logger.error(
-            "Gemini extraction failed entirely. Returning MANUAL_REVIEW sentinel."
-        )
         return _build_manual_review_sentinel(member_id)
 
-    # ── Parse & validate raw JSON ────────────────────────────────────────
     try:
-        # Pydantic schema validation happens seamlessly
         raw_json = json.loads(raw_text)
         logger.info(
             "Gemini raw extraction:\n%s",
@@ -198,7 +180,6 @@ def extract_claim_from_images(
         logger.error("JSON/RawGeminiExtraction validation failed: %s", exc)
         return _build_manual_review_sentinel(member_id)
 
-    # ── Anti-Corruption Layer: map DTO → domain entities ─────────────────
     return _map_to_domain_entity(
         raw_data, member_id, ytd_claimed_amount, previous_claims_same_day
     )
@@ -210,10 +191,7 @@ def _map_to_domain_entity(
     ytd_claimed_amount: float,
     previous_claims_same_day: int,
 ) -> ClaimInputEntity:
-    """
-    Maps the raw LLM output to the strongly-typed domain entity consumed by
-    the adjudication engine.
-    """
+
     # ── Prescription ──────────────────────────────────────────────────────
     has_prescription = any(
         [
@@ -231,7 +209,7 @@ def _map_to_domain_entity(
             doctor_name=raw.doctor_name or "Unknown Doctor",
             doctor_reg=raw.doctor_registration_number or "",
             diagnosis=raw.primary_diagnosis or "Unknown Diagnosis",
-            treatment=raw.treatment_plan,  # Mapped treatment payload
+            treatment=raw.treatment_plan,
             medicines_prescribed=raw.medicines_list or [],
             procedures=raw.procedures_list or [],
             tests_prescribed=raw.tests_list or [],
@@ -244,7 +222,7 @@ def _map_to_domain_entity(
         diagnostic_tests=raw.diagnostics_cost or 0.0,
         medicines=raw.pharmacy_cost or 0.0,
         total_amount=raw.total_billed_amount or 0.0,
-        itemized_ledger=raw.other_billed_items or {},  # Mapped dynamic ledger
+        itemized_bill=raw.itemized_bill or [],  # Safely mapped AI-categorized Enum list
     )
 
     docs_obj = DocumentAttachments(prescription=prescription_obj, bill=bill_obj)
@@ -264,10 +242,6 @@ def _map_to_domain_entity(
 
 
 def _build_manual_review_sentinel(member_id: str) -> ClaimInputEntity:
-    """
-    Returns a ClaimInputEntity that will always trigger MANUAL_REVIEW in the
-    engine (via the data-integrity guard). Used when extraction fails entirely.
-    """
     return ClaimInputEntity(
         member_id=member_id,
         member_name="Unknown",

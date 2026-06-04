@@ -17,7 +17,12 @@ import re
 from datetime import date, datetime, timedelta
 from typing import List, Optional, Tuple
 
-from entities.schemas import ClaimInputEntity, DecisionEnum, MedicalBill, MedicalPrescription
+from entities.schemas import (
+    ClaimInputEntity,
+    DecisionEnum,
+    MedicalBill,
+    MedicalPrescription,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +50,7 @@ EXCLUSION_KEYWORDS: List[str] = [
     "cosmetic",
     "weight loss",
     "bariatric",
-    "obesity",          # Weight-loss bucket
+    "obesity",  # Weight-loss bucket
     "infertility",
     "ivf",
     "experimental",
@@ -55,8 +60,8 @@ EXCLUSION_KEYWORDS: List[str] = [
     "aids",
     "alcohol",
     "drug abuse",
-    "lasik",            # Vision exclusion
-    "whitening",        # Dental cosmetic
+    "lasik",  # Vision exclusion
+    "whitening",  # Dental cosmetic
     "botox",
     "filler",
     "rhinoplasty",
@@ -72,12 +77,13 @@ CONDITION_WAITING_PERIODS: dict = {
 
 # Tests that always require pre-authorisation
 PREAUTH_TESTS: List[str] = ["mri", "ct scan", "ct-scan", "computed tomography"]
-PREAUTH_MIN_AMOUNT: float = 10_000.0   # Pre-auth only enforced above this threshold
+PREAUTH_MIN_AMOUNT: float = 10_000.0  # Pre-auth only enforced above this threshold
 
 
 # ---------------------------------------------------------------------------
 # Helper utilities
 # ---------------------------------------------------------------------------
+
 
 def _parse_date(date_str: Optional[str]) -> Optional[date]:
     """Try common Indian date formats and return a date object or None."""
@@ -103,10 +109,10 @@ def _validate_doctor_reg(reg: Optional[str]) -> bool:
         return False
     reg = reg.strip().upper()
     patterns = [
-        r"^[A-Z]{2,3}\/\d+\/\d{4}$",           # KA/45678/2015
-        r"^AYUR\/[A-Z]{2}\/\d+\/\d{4}$",        # AYUR/KL/2345/2019
-        r"^HOMEO\/[A-Z]{2}\/\d+\/\d{4}$",        # HOMEO/KL/2345/2019
-        r"^UNANI\/[A-Z]{2}\/\d+\/\d{4}$",        # UNANI/KL/2345/2019
+        r"^[A-Z]{2,3}\/\d+\/\d{4}$",  # KA/45678/2015
+        r"^AYUR\/[A-Z]{2}\/\d+\/\d{4}$",  # AYUR/KL/2345/2019
+        r"^HOMEO\/[A-Z]{2}\/\d+\/\d{4}$",  # HOMEO/KL/2345/2019
+        r"^UNANI\/[A-Z]{2}\/\d+\/\d{4}$",  # UNANI/KL/2345/2019
         r"^[A-Z]{2,3}\/[A-Z]{2,3}\/\d+\/\d{4}$",  # DEN/MH/12345/2020
     ]
     return any(re.match(p, reg) for p in patterns)
@@ -175,16 +181,18 @@ def _check_exclusions(
 ) -> Optional[str]:
     """
     Returns 'SERVICE_NOT_COVERED' if an exclusion keyword is found in the
-    PRIMARY DIAGNOSIS or MAIN TREATMENT. 
+    PRIMARY DIAGNOSIS or MAIN TREATMENT.
     Ancillary procedures and medicines are handled line-by-line during payout calculation.
     """
-    primary_reason = f"{diagnosis} {treatment}".lower()
-    
+    primary_reason = diagnosis.lower()
+
     for keyword in EXCLUSION_KEYWORDS:
         if keyword in primary_reason:
-            logger.info("Exclusion hit: keyword='%s' in primary diagnosis/treatment", keyword)
+            logger.info(
+                "Exclusion hit: keyword='%s' in primary diagnosis/treatment", keyword
+            )
             return "SERVICE_NOT_COVERED"
-            
+
     return None
 
 
@@ -213,7 +221,14 @@ def _check_medical_necessity(prescription: Optional[MedicalPrescription]) -> flo
         score += 0.05
 
     # Penalty: procedures that look cosmetic alongside a medical diagnosis
-    cosmetic_terms = {"whitening", "botox", "filler", "liposuction", "rhinoplasty", "lasik"}
+    cosmetic_terms = {
+        "whitening",
+        "botox",
+        "filler",
+        "liposuction",
+        "rhinoplasty",
+        "lasik",
+    }
     all_procedures = set(p.lower() for p in prescription.procedures)
     if all_procedures & cosmetic_terms and prescription.diagnosis:
         score -= 0.20  # Mixed bag — flag, don't outright reject
@@ -268,7 +283,11 @@ def _compute_approved_amount(
         diag_cfg = coverage["diagnostic_tests"]
 
         # Pre-auth enforcement for MRI / CT above the threshold
-        tests = [t.lower() for t in (prescription.tests_prescribed or [])] if prescription else []
+        tests = (
+            [t.lower() for t in (prescription.tests_prescribed or [])]
+            if prescription
+            else []
+        )
         needs_preauth = any(pat in t for pat in PREAUTH_TESTS for t in tests)
 
         if needs_preauth and bill.diagnostic_tests > PREAUTH_MIN_AMOUNT:
@@ -309,20 +328,48 @@ def _compute_approved_amount(
         approved += eligible_pharma
 
     # ── 4. Itemized ledger — handle mixed covered/excluded line items ──────
-    for item_name, item_amount in bill.itemized_ledger.items():
-        item_lower = item_name.lower()
-        is_excluded = any(kw in item_lower for kw in EXCLUSION_KEYWORDS)
-        if is_excluded:
-            notes.append(f"'{item_name}' excluded as cosmetic/non-covered procedure (₹{item_amount:,.0f} not approved).")
-        else:
-            approved += item_amount
+    ADMIN_FALLBACK_KEYWORDS = [
+        "gst",
+        "tax",
+        "sub total",
+        "subtotal",
+        "grand total",
+        "total",
+        "cgst",
+        "sgst",
+    ]
 
+    for item in bill.itemized_bill:
+        item_lower = item.item_name.lower()
+
+        # DEFENSE IN DEPTH: Block both the AI category AND string-matched totals
+        if item.category == "ADMIN_TAXES" or any(
+            kw in item_lower for kw in ADMIN_FALLBACK_KEYWORDS
+        ):
+            continue
+
+        elif item.category == "COSMETIC_EXCLUDED":
+            notes.append(
+                f"'{item.item_name}' rejected as it is classified as a cosmetic/excluded procedure (₹{item.amount:,.0f} not approved)."
+            )
+
+        elif item.category == "DENTAL_COVERED":
+            approved += item.amount
+            notes.append(f"'{item.item_name}' approved under dental coverage.")
+
+        elif item.category in ["CONSULTATION", "DIAGNOSTICS", "PHARMACY"]:
+            # Skip if the AI also logged these here to prevent double-counting
+            continue
+
+        else:  # OTHER categories
+            approved += item.amount
     return round(approved, 2), notes, flags
 
 
 # ---------------------------------------------------------------------------
 # Main adjudication entry point
 # ---------------------------------------------------------------------------
+
 
 def evaluate_policy_rules(claim: ClaimInputEntity) -> dict:
     """
@@ -523,7 +570,9 @@ def evaluate_policy_rules(claim: ClaimInputEntity) -> dict:
     # STEP 4 — Amount calculation (sub-limits, co-pays, discounts)
     # ═══════════════════════════════════════════════════════════════════════
     is_network = _is_network_hospital(claim)
-    approved_amount, calc_notes, calc_flags = _compute_approved_amount(claim, is_network)
+    approved_amount, calc_notes, calc_flags = _compute_approved_amount(
+        claim, is_network
+    )
     notes.extend(calc_notes)
 
     # Surface pre-auth failure as a hard rejection
@@ -548,7 +597,7 @@ def evaluate_policy_rules(claim: ClaimInputEntity) -> dict:
     # STEP 4b — Dynamic Per-Claim Limit Verification (Data-Driven)
     # ═══════════════════════════════════════════════════════════════════════
     effective_per_claim_limit = PER_CLAIM_LIMIT
-    
+
     # 1. Safely aggregate all text from the claim to match against policy coverage lists
     claim_text_elements = []
     if prescription:
@@ -556,26 +605,28 @@ def evaluate_policy_rules(claim: ClaimInputEntity) -> dict:
         claim_text_elements.extend(prescription.tests_prescribed or [])
         claim_text_elements.append(prescription.treatment or "")
     if bill:
-        claim_text_elements.extend(bill.itemized_ledger.keys())
-        
+        # Extract names from the new Pydantic List instead of dict keys
+        claim_text_elements.extend([item.item_name for item in bill.itemized_bill])
+
     claim_text_joined = " ".join([str(t) for t in claim_text_elements if t]).lower()
 
     # 2. Dynamically scan the policy for any category that provides a higher sub-limit
     for category, config in POLICY["coverage_details"].items():
         if isinstance(config, dict) and "sub_limit" in config:
-            # Extract any array of covered items defined in this category (e.g., procedures_covered)
             covered_terms = []
             for key, value in config.items():
                 if isinstance(value, list):
                     covered_terms.extend([str(v).lower() for v in value])
-            
-            # 3. If the claim text contains any of these explicit policy terms, upgrade the limit
-            if covered_terms and any(term in claim_text_joined for term in covered_terms):
+
+            if covered_terms and any(
+                term in claim_text_joined for term in covered_terms
+            ):
                 if config["sub_limit"] > effective_per_claim_limit:
                     effective_per_claim_limit = config["sub_limit"]
-                    notes.append(f"Applied higher specific sub-limit (₹{effective_per_claim_limit:,.0f}) for {category.replace('_', ' ')}.")
+                    notes.append(
+                        f"Applied higher specific sub-limit (₹{effective_per_claim_limit:,.0f}) for {category.replace('_', ' ')}."
+                    )
 
-    # 4. Evaluate against the CALCULATED eligible amount, NOT the raw requested amount
     if approved_amount > effective_per_claim_limit:
         return {
             "decision": DecisionEnum.REJECTED,
@@ -583,7 +634,7 @@ def evaluate_policy_rules(claim: ClaimInputEntity) -> dict:
             "rejection_reasons": ["PER_CLAIM_EXCEEDED"],
             "confidence_score": 0.98,
             "notes": f"Eligible amount (₹{approved_amount:,.0f}) exceeds the applicable per-claim limit of ₹{effective_per_claim_limit:,.0f}.",
-            "next_steps": "Contact support to check if your plan includes corporate buffer extensions."
+            "next_steps": "Contact support to check if your plan includes corporate buffer extensions.",
         }
     # ═══════════════════════════════════════════════════════════════════════
     # STEP 5 — Medical necessity heuristic
@@ -612,7 +663,11 @@ def evaluate_policy_rules(claim: ClaimInputEntity) -> dict:
     # ═══════════════════════════════════════════════════════════════════════
     # Final decision assembly
     # ═══════════════════════════════════════════════════════════════════════
-    has_cosmetic_exclusions = any("excluded as cosmetic" in n.lower() for n in calc_notes)
+    has_deductions = any(
+        keyword in n.lower() 
+        for n in notes 
+        for keyword in ["rejected as", "capped at", "co-pay", "excluded"]
+    )
 
     if rejection_reasons:
         return {
@@ -634,9 +689,8 @@ def evaluate_policy_rules(claim: ClaimInputEntity) -> dict:
             "next_steps": "Review the policy exclusions list."
         }
         
-    # Partial approval: some line items were excluded (e.g. dental whitening) or
-    # the annual cap reduced the payout below the full calculated amount.
-    if has_cosmetic_exclusions or annual_cap_applies:
+    # PARTIAL APPROVAL TRIGGER
+    if has_deductions or annual_cap_applies:
         return {
             "decision": DecisionEnum.PARTIAL,
             "approved_amount": approved_amount,
@@ -645,10 +699,11 @@ def evaluate_policy_rules(claim: ClaimInputEntity) -> dict:
             "notes": " | ".join(n for n in notes if n),
             "next_steps": (
                 "Partial disbursement will be initiated. "
-                "Review the excluded items in the notes above."
+                "Review the excluded items and deductions in the notes above."
             ),
         }
 
+    # FULL APPROVAL DEFAULT
     return {
         "decision": DecisionEnum.APPROVED,
         "approved_amount": approved_amount,

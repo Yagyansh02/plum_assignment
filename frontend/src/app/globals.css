@@ -1,0 +1,250 @@
+@import "tailwindcss";
+
+/* ─── Plum Design System Tokens ─────────────────────────────────────── */
+:root {
+  /* Brand Colors */
+  --plum-950: #12061f;
+  --plum-900: #1a0a2e;
+  --plum-800: #22103a;
+  --plum-700: #2d1550;
+  --plum-red: #e11d48;
+  --plum-red-hover: #be123c;
+  --plum-purple: #7c3aed;
+  --plum-purple-light: #a855f7;
+
+  /* Text */
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #64748b;
+
+  /* Glass */
+  --glass-bg: rgba(255, 255, 255, 0.03);
+  --glass-border: rgba(255, 255, 255, 0.08);
+}
+
+@theme inline {
+  --color-background: #12061f;
+  --color-foreground: #f8fafc;
+  --color-plum-950: #12061f;
+  --color-plum-900: #1a0a2e;
+  --color-plum-800: #22103a;
+  --color-plum-700: #2d1550;
+  --color-plum-red: #e11d48;
+  --color-plum-red-hover: #be123c;
+  --color-plum-purple: #7c3aed;
+  --color-plum-purple-light: #a855f7;
+}
+
+/* ─── Base ───────────────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  height: 100%;
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--plum-950);
+  color: var(--text-primary);
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  min-height: 100%;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ─── Scrollbar ──────────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* ─── Animations ─────────────────────────────────────────────────────── */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-8px); }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+@keyframes pulse-ring {
+  0%   { transform: scale(0.95); opacity: 1; }
+  100% { transform: scale(1.3); opacity: 0; }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.6s ease-out both;
+}
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.06) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2s linear infinite;
+}
+
+/* ─── Utility Shorthands ─────────────────────────────────────────────── */
+.glass {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.gradient-text {
+  background: linear-gradient(135deg, #f8fafc 0%, var(--plum-purple-light) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.gradient-text-red {
+  background: linear-gradient(135deg, var(--plum-red) 0%, #fb7185 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ─── Clerk overrides (direct CSS — reliable regardless of Tailwind scanning) ── */
+
+/* Layout */
+.cl-rootBox { width: 100%; }
+
+/* Card */
+.cl-card {
+  background: #1a0a2e !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 1rem !important;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6) !important;
+}
+
+/* Header */
+.cl-headerTitle { color: #ffffff !important; }
+.cl-headerSubtitle { color: rgba(255, 255, 255, 0.7) !important; }
+
+/* Social buttons */
+.cl-socialButtonsBlockButton {
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: #ffffff !important;
+}
+.cl-socialButtonsBlockButton:hover {
+  background: rgba(255, 255, 255, 0.1) !important;
+}
+.cl-socialButtonsBlockButtonText { color: #ffffff !important; }
+
+/* Divider */
+.cl-dividerLine { background-color: rgba(255, 255, 255, 0.1) !important; }
+.cl-dividerText { color: rgba(255, 255, 255, 0.5) !important; }
+
+/* Form fields */
+.cl-formFieldLabel { color: rgba(255, 255, 255, 0.8) !important; }
+.cl-formFieldInput {
+  background-color: #12061f !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  color: #ffffff !important;
+}
+.cl-formFieldInput:focus {
+  border-color: #e11d48 !important;
+  box-shadow: 0 0 0 2px rgba(225, 29, 72, 0.2) !important;
+}
+.cl-formFieldInput::placeholder { color: rgba(255, 255, 255, 0.3) !important; }
+
+/* Primary button */
+.cl-formButtonPrimary {
+  background-color: #e11d48 !important;
+  color: #ffffff !important;
+  font-weight: 600 !important;
+}
+.cl-formButtonPrimary:hover {
+  background-color: #be123c !important;
+}
+
+/* Footer */
+.cl-footerActionText { color: rgba(255, 255, 255, 0.7) !important; }
+.cl-footerActionLink { color: #e11d48 !important; }
+.cl-footerActionLink:hover { color: #fb7185 !important; }
+
+/* Misc internal text */
+.cl-identityPreviewText { color: #ffffff !important; }
+.cl-identityPreviewEditButton { color: #e11d48 !important; }
+.cl-formFieldSuccessText { color: #34d399 !important; }
+.cl-formFieldInfoText { color: rgba(255, 255, 255, 0.7) !important; }
+.cl-formFieldErrorText { color: #fb7185 !important; }
+
+/* UserButton popover */
+.cl-userButtonPopoverCard {
+  background: #1a0a2e !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+.cl-userButtonPopoverActionButton { color: rgba(255, 255, 255, 0.8) !important; }
+.cl-userButtonPopoverActionButton:hover {
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: #ffffff !important;
+}
+.cl-userButtonPopoverFooter { border-top-color: rgba(255, 255, 255, 0.08) !important; }
+
+/* ─── Tailwind v4 utility aliases ────────────────────────────────────── */
+/* These low-opacity classes may not be auto-generated by the v4 scanner   */
+/* when they only appear inside Clerk elements objects or dynamic strings. */
+@layer utilities {
+  .bg-white\/2  { background-color: rgba(255, 255, 255, 0.02); }
+  .bg-white\/3  { background-color: rgba(255, 255, 255, 0.03); }
+  .bg-white\/4  { background-color: rgba(255, 255, 255, 0.04); }
+  .bg-white\/5  { background-color: rgba(255, 255, 255, 0.05); }
+  .bg-white\/6  { background-color: rgba(255, 255, 255, 0.06); }
+  .bg-white\/8  { background-color: rgba(255, 255, 255, 0.08); }
+  .hover\:bg-white\/4:hover  { background-color: rgba(255, 255, 255, 0.04); }
+  .hover\:bg-white\/5:hover  { background-color: rgba(255, 255, 255, 0.05); }
+  .hover\:bg-white\/8:hover  { background-color: rgba(255, 255, 255, 0.08); }
+  .hover\:bg-white\/10:hover { background-color: rgba(255, 255, 255, 0.10); }
+  .border-white\/6  { border-color: rgba(255, 255, 255, 0.06); }
+  .border-white\/8  { border-color: rgba(255, 255, 255, 0.08); }
+  .border-white\/10 { border-color: rgba(255, 255, 255, 0.10); }
+  .border-white\/15 { border-color: rgba(255, 255, 255, 0.15); }
+  .border-white\/20 { border-color: rgba(255, 255, 255, 0.20); }
+  .border-white\/25 { border-color: rgba(255, 255, 255, 0.25); }
+}
+
+/* ─── Animate-in helpers (used by ResultsDisplay) ────────────────────── */
+@keyframes slideInFromBottom {
+  from { opacity: 0; transform: translateY(1rem); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-in { animation-fill-mode: both; }
+.fade-in    { animation-name: fadeInUp; }
+.slide-in-from-bottom-4 { animation-name: slideInFromBottom; }
+.duration-500 { animation-duration: 500ms; }

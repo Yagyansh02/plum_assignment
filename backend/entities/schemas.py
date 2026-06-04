@@ -7,10 +7,10 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------------------
-# Decision outcome
+# Decision outcome & Enums
 # ---------------------------------------------------------------------------
 
 
@@ -21,10 +21,27 @@ class DecisionEnum(str, Enum):
     MANUAL_REVIEW = "MANUAL_REVIEW"
 
 
+class ItemCategory(str, Enum):
+    CONSULTATION = "CONSULTATION"
+    DIAGNOSTICS = "DIAGNOSTICS"
+    PHARMACY = "PHARMACY"
+    DENTAL_COVERED = "DENTAL_COVERED"
+    COSMETIC_EXCLUDED = "COSMETIC_EXCLUDED"  # AI tags whitening/botox here!
+    ADMIN_TAXES = "ADMIN_TAXES"  # AI tags GST/Registration here!
+    OTHER = "OTHER"
+
+
 # ---------------------------------------------------------------------------
 # Document sub-models
 # ---------------------------------------------------------------------------
 
+
+class BilledItem(BaseModel):
+    item_name: str
+    amount: float
+    category: ItemCategory = Field(
+        description="Classify the line item into one of the strict enum categories based on medical context. IMPORTANT: 'ADMIN_TAXES' must include all taxes, subtotals, grand totals, and admin fees."
+    )
 
 class MedicalPrescription(BaseModel):
     doctor_name: Optional[str] = Field(default=None)
@@ -37,64 +54,12 @@ class MedicalPrescription(BaseModel):
 
 
 class MedicalBill(BaseModel):
-
     hospital_name: Optional[str] = Field(default=None)
     total_amount: float = Field(default=0.0)
-
     consultation_fee: float = Field(default=0.0)
     diagnostic_tests: float = Field(default=0.0)
     medicines: float = Field(default=0.0)
-
-    # Catches any extra numeric line-items from unusual hospital bill formats
-    itemized_ledger: Dict[str, float] = Field(default_factory=dict)
-
-    @model_validator(mode="before")
-    @classmethod
-    def normalize_hospital_line_items(cls, data: Any) -> Any:
-        """
-        Sweeps unrecognised numeric fields into itemized_ledger.
-        hospital_name and total_amount are now in standard_keys so they are
-        never accidentally redirected there.
-        """
-        if not isinstance(data, dict):
-            return data
-
-        standard_keys = {
-            "hospital_name",
-            "total_amount",
-            "consultation_fee",
-            "diagnostic_tests",
-            "medicines",
-            "itemized_ledger",
-        }
-
-        normalized: Dict[str, Any] = {}
-        itemized_charges: Dict[str, float] = {}
-
-        for key, value in data.items():
-            if key in standard_keys:
-                normalized[key] = value
-            elif isinstance(value, (int, float)):
-                # Unknown numeric field → line item
-                itemized_charges[key] = float(value)
-            else:
-                # Unknown non-numeric field → pass through (may be ignored by Pydantic)
-                normalized[key] = value
-
-        # Merge with any explicitly provided itemized_ledger
-        existing_ledger = normalized.get("itemized_ledger", {}) or {}
-        normalized["itemized_ledger"] = {**itemized_charges, **existing_ledger}
-
-        # Auto-derive total_amount if not explicitly provided
-        if not normalized.get("total_amount"):
-            normalized["total_amount"] = (
-                float(normalized.get("consultation_fee", 0) or 0)
-                + float(normalized.get("diagnostic_tests", 0) or 0)
-                + float(normalized.get("medicines", 0) or 0)
-                + sum(normalized["itemized_ledger"].values())
-            )
-
-        return normalized
+    itemized_bill: List[BilledItem] = Field(default_factory=list)
 
 
 class DocumentAttachments(BaseModel):
@@ -111,32 +76,13 @@ class ClaimInputEntity(BaseModel):
     member_id: str
     member_name: str
     treatment_date: str
-
     claim_amount: float
-
-    ytd_claimed_amount: float = Field(
-        default=0.0,
-        description="Total amount already claimed by this member in the current policy year.",
-    )
-
-    submission_date: Optional[str] = Field(
-        default=None,
-        description="Date on which the claim was submitted. Defaults to treatment date if omitted.",
-    )
-
-    member_join_date: Optional[str] = Field(
-        default=None,
-        description="Policy start date for the member — needed for waiting-period checks.",
-    )
-    hospital: Optional[str] = Field(
-        default=None,
-        description="Hospital name from the intake form; used as fallback for network lookup.",
-    )
+    ytd_claimed_amount: float = Field(default=0.0)
+    submission_date: Optional[str] = Field(default=None)
+    member_join_date: Optional[str] = Field(default=None)
+    hospital: Optional[str] = Field(default=None)
     cashless_request: bool = False
-    previous_claims_same_day: int = Field(
-        default=0,
-        description="Number of other claims filed by this member on the same treatment date.",
-    )
+    previous_claims_same_day: int = Field(default=0)
     documents: DocumentAttachments
 
 
@@ -148,15 +94,11 @@ class ClaimInputEntity(BaseModel):
 class RawGeminiExtraction(BaseModel):
     """
     Flexible DTO that maps 1-to-1 with what the vision model returns.
-    Everything is Optional to prevent crashes when a field is absent.
     """
-
 
     patient_name: Optional[str] = Field(default=None)
     date_of_treatment: Optional[str] = Field(default=None)
-    submission_date: Optional[str] = Field(
-        default=None, description="Date of claim submission if visible"
-    )
+    submission_date: Optional[str] = Field(default=None)
     total_billed_amount: Optional[float] = Field(default=None)
     hospital_name: Optional[str] = Field(default=None)
     is_cashless: Optional[bool] = Field(default=None)
@@ -176,7 +118,7 @@ class RawGeminiExtraction(BaseModel):
     consultation_cost: Optional[float] = Field(default=None)
     diagnostics_cost: Optional[float] = Field(default=None)
     pharmacy_cost: Optional[float] = Field(default=None)
-    other_billed_items: Dict[str, float] = Field(
-        default_factory=dict,
-        description="Any other itemized charges on the bill (e.g., procedures, room rent, specific therapies) mapped as Item Name -> Amount.",
+    itemized_bill: List[BilledItem] = Field(
+        default_factory=list,
+        description="Extract EVERY line item on the bill (including taxes and totals) and classify it.",
     )
