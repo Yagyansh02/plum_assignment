@@ -38,6 +38,8 @@ export default function SignInPage() {
               socialButtonsBlockButton:
                 "!border !border-white/10 !bg-white/5 hover:!bg-white/10 !transition-colors",
               socialButtonsBlockButtonText: "!text-white !font-medium",
+              lastAuthenticationStrategyBadge:
+                "!bg-white/90 !text-black !font-medium",
               dividerLine: "!bg-white/10",
               dividerText: "!text-white/50",
               formFieldLabel: "!text-white/80",

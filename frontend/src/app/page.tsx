@@ -72,12 +72,7 @@ export default function LandingPage() {
           </div>
 
           <div className="relative z-10 max-w-4xl">
-            {/* Eyebrow */}
-            <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-plum-purple/30 bg-plum-purple/10 px-4 py-1.5 text-xs font-medium text-plum-purple-light">
-              <span className="h-1.5 w-1.5 rounded-full bg-plum-purple animate-pulse" />
-              AI-Powered OPD Claim Adjudication
-            </div>
-
+         
             {/* Headline */}
             <h1 className="text-5xl font-black leading-tight tracking-tight text-white sm:text-6xl lg:text-7xl">
               Employee benefits your
@@ -88,16 +83,12 @@ export default function LandingPage() {
 
             <p className="mx-auto mt-6 max-w-xl text-base text-white/55">
               Submit OPD claim documents and receive an instant, AI-powered
-              adjudication decision — in seconds, not days.
+              adjudication decision - in seconds, not days.
             </p>
 
             {/* Auth-aware CTA (client component) */}
             <HeroCTA />
-
-            {/* Trust badge */}
-            <p className="mt-5 text-xs text-white/30">
-              Powered by Google Gemini Vision · Built on Plum&apos;s policy engine
-            </p>
+           
           </div>
         </section>
 

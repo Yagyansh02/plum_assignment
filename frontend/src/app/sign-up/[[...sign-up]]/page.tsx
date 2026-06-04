@@ -31,8 +31,8 @@ export default function SignUpPage() {
               fontFamily: "Inter, system-ui, sans-serif",
             },
             elements: {
-              rootBox: "w-full",
-              card: "!bg-[#1a0a2e] !border !border-white/8 !shadow-2xl",
+              rootBox: "w-full flex justify-center",
+              card: "w-full !bg-[#1a0a2e] !border !border-white/8 !shadow-2xl",
               headerTitle: "!text-white",
               headerSubtitle: "!text-white/70",
               socialButtonsBlockButton:
