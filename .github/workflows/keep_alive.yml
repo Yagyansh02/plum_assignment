@@ -12,8 +12,8 @@ jobs:
     steps:
       - name: Ping FastAPI Health Endpoint
         env:
-          # Replace this with your actual Render URL!
-          BACKEND_URL: https://your-app-name.onrender.com/health
+          # Your exact Render URL is injected here!
+          BACKEND_URL: https://plum-assignment-93se.onrender.com/health
         run: |
           echo "Pinging $BACKEND_URL..."
           HTTP_STATUS=$(curl -o /dev/null -s -w "%{http_code}\n" "$BACKEND_URL")
