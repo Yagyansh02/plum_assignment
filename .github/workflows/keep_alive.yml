@@ -1,0 +1,26 @@
+name: Render Keep-Alive Ping
+
+on:
+  schedule:
+    # Runs every 14 minutes to beat the 15-minute Render sleep timer
+    - cron: '*/14 * * * *'
+  workflow_dispatch: # Allows you to trigger it manually from GitHub UI
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping FastAPI Health Endpoint
+        env:
+          # Replace this with your actual Render URL!
+          BACKEND_URL: https://your-app-name.onrender.com/health
+        run: |
+          echo "Pinging $BACKEND_URL..."
+          HTTP_STATUS=$(curl -o /dev/null -s -w "%{http_code}\n" "$BACKEND_URL")
+          
+          if [ "$HTTP_STATUS" -eq 200 ]; then
+            echo "✅ Success: Backend is awake (Status: $HTTP_STATUS)"
+          else
+            echo "❌ Warning: Backend returned status $HTTP_STATUS"
+            exit 1
+          fi
