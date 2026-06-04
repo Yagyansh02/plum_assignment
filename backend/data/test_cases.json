@@ -49,8 +49,11 @@
             "procedures": ["Root canal treatment", "Teeth whitening"]
           },
           "bill": {
-            "root_canal": 8000,
-            "teeth_whitening": 4000
+            "total_amount": 12000,
+            "itemized_bill": [
+              { "item_name": "Root Canal Treatment", "amount": 8000, "category": "DENTAL_COVERED" },
+              { "item_name": "Teeth Whitening", "amount": 4000, "category": "COSMETIC_EXCLUDED" }
+            ]
           }
         }
       },
@@ -161,7 +164,10 @@
           },
           "bill": {
             "consultation_fee": 1000,
-            "therapy_charges": 3000
+            "total_amount": 4000,
+            "itemized_bill": [
+              { "item_name": "Panchakarma Therapy Session", "amount": 3000, "category": "OTHER" }
+            ]
           }
         }
       },

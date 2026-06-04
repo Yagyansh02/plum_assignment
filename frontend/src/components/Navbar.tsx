@@ -73,6 +73,16 @@ export default function Navbar() {
                   Dashboard
                 </Link>
               )}
+              <Link
+                href="/admin"
+                className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-all ${
+                  pathname?.startsWith("/admin")
+                    ? "border-plum-purple/40 bg-plum-purple/15 text-plum-purple-light"
+                    : "border-white/10 text-white/50 hover:border-plum-purple/30 hover:text-plum-purple-light hover:bg-plum-purple/5"
+                }`}
+              >
+                🛡️ Admin
+              </Link>
               <UserButton
                 appearance={{
                   elements: {

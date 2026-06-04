@@ -99,3 +99,32 @@ export interface ClaimSubmitState {
   result: AdjudicationResponse | null;
   error: string | null;
 }
+
+// ---------------------------------------------------------------------------
+// Admin Dashboard types
+// ---------------------------------------------------------------------------
+
+export interface AdminClaimRecord {
+  id: string;
+  member_id: string;
+  member_name: string;
+  treatment_date: string;
+  submission_date: string;
+  status: Decision;
+  raw_claim_amount: number;
+  approved_amount: number;
+  rejection_reasons: string[];
+  notes: string;
+  flags: string[];
+  confidence_score: number | null;
+  has_documents: boolean;
+  document_count: number;
+  llm_raw_extraction: Record<string, unknown>;
+}
+
+export interface AdminClaimsResponse {
+  claims: AdminClaimRecord[];
+  total: number;
+  limit: number;
+  offset: number;
+}

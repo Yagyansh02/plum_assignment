@@ -1,9 +1,9 @@
 import os
 import uuid
 from datetime import date
-from typing import List
+from typing import List, Optional
 from dotenv import load_dotenv
-from sqlmodel import SQLModel, Field, Session, create_engine, Column, JSON
+from sqlmodel import SQLModel, Field, Session, create_engine, Column, JSON, String
 
 load_dotenv()
 
@@ -36,3 +36,12 @@ class ClaimRecord(SQLModel, table=True):
     approved_amount: float
     rejection_reasons: List[str] = Field(default_factory=list, sa_column=Column(JSON))
     llm_raw_extraction: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    # ── Admin Dashboard fields ──
+    notes: Optional[str] = Field(default=None, sa_column=Column(String, nullable=True))
+    flags: List[str] = Field(default_factory=list, sa_column=Column("flags", JSON))
+    confidence_score: Optional[float] = Field(default=None)
+    uploaded_documents: List[dict] = Field(
+        default_factory=list,
+        sa_column=Column("uploaded_documents", JSON),
+        description="List of {filename, content_type, data_b64} for admin document review",
+    )

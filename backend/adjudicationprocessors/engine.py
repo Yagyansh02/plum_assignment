@@ -604,10 +604,12 @@ def evaluate_policy_rules(claim: ClaimInputEntity) -> dict:
     # ═══════════════════════════════════════════════════════════════════════
     # Final decision assembly
     # ═══════════════════════════════════════════════════════════════════════
-    has_deductions = any(
+    # Only trigger PARTIAL for actual item rejections/exclusions — NOT for
+    # standard co-pays or network discounts which are normal policy terms.
+    has_rejected_items = any(
         keyword in n.lower() 
         for n in notes 
-        for keyword in ["rejected as", "capped at", "co-pay", "excluded"]
+        for keyword in ["rejected as", "not approved", "non-reimbursable"]
     )
 
     if rejection_reasons:
@@ -631,7 +633,7 @@ def evaluate_policy_rules(claim: ClaimInputEntity) -> dict:
         }
         
     # PARTIAL APPROVAL TRIGGER
-    if has_deductions or annual_cap_applies:
+    if has_rejected_items or annual_cap_applies:
         return {
             "decision": DecisionEnum.PARTIAL,
             "approved_amount": approved_amount,

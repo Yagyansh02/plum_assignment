@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import type { SubmitState } from "@/types";
+
+// 👇 Tell Next.js to only load the Lottie Player in the browser, never on the server.
+const Player = dynamic(
+  () => import("@lottiefiles/react-lottie-player").then((mod) => mod.Player),
+  { ssr: false }
+);
 
 const STEPS: Record<Exclude<SubmitState, "idle" | "success" | "error">, string[]> = {
   uploading: ["Uploading documents...", "Preparing for analysis..."],
@@ -33,23 +40,25 @@ export default function LoadingSpinner({ state }: LoadingSpinnerProps) {
     }, 1800);
 
     return () => clearInterval(interval);
-  }, [state]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [state, steps.length]);
 
   const currentStep = steps[stepIndex] ?? "Processing...";
 
   return (
     <div className="flex flex-col items-center justify-center gap-6 py-16">
-      {/* Animated logo ring */}
-      <div className="relative flex items-center justify-center">
-        <div className="absolute h-20 w-20 rounded-full border-2 border-plum-red/20 animate-ping" />
-        <div className="absolute h-16 w-16 rounded-full border-2 border-plum-purple/40 animate-spin [animation-duration:2s]" />
-        <div className="relative flex h-12 w-12 items-center justify-center rounded-full bg-plum-950 border border-white/10">
-          <span className="text-xl font-black text-plum-red">p</span>
-        </div>
+      
+      {/* ── Lottie Animation ─────────────────────────────────────── */}
+      <div className="relative flex items-center justify-center h-42 w-42">
+        <Player
+          autoplay
+          loop
+          src="/spinner.json"
+          style={{ height: "100%", width: "100%" }}
+        />
       </div>
 
-      {/* Step text */}
-      <div className="text-center">
+      {/* ── Step text ────────────────────────────────────────────── */}
+      <div className="text-center mt-2">
         <p className="text-sm font-medium text-white/90 transition-all duration-500">
           {currentStep}
         </p>
@@ -58,8 +67,8 @@ export default function LoadingSpinner({ state }: LoadingSpinnerProps) {
         </p>
       </div>
 
-      {/* Progress dots */}
-      <div className="flex gap-1.5">
+      {/* ── Progress dots ────────────────────────────────────────── */}
+      <div className="flex gap-1.5 mt-2">
         {steps.map((_, i) => (
           <div
             key={i}
