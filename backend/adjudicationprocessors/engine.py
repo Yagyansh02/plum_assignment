@@ -105,6 +105,8 @@ def _validate_doctor_reg(reg: Optional[str]) -> bool:
     patterns = [
         r"^[A-Z]{2,3}\/\d+\/\d{4}$",           # KA/45678/2015
         r"^AYUR\/[A-Z]{2}\/\d+\/\d{4}$",        # AYUR/KL/2345/2019
+        r"^HOMEO\/[A-Z]{2}\/\d+\/\d{4}$",        # HOMEO/KL/2345/2019
+        r"^UNANI\/[A-Z]{2}\/\d+\/\d{4}$",        # UNANI/KL/2345/2019
         r"^[A-Z]{2,3}\/[A-Z]{2,3}\/\d+\/\d{4}$",  # DEN/MH/12345/2020
     ]
     return any(re.match(p, reg) for p in patterns)
@@ -172,14 +174,17 @@ def _check_exclusions(
     medicines: List[str],
 ) -> Optional[str]:
     """
-    Returns 'SERVICE_NOT_COVERED' if any exclusion keyword is found across all
-    text fields, otherwise None.
+    Returns 'SERVICE_NOT_COVERED' if an exclusion keyword is found in the
+    PRIMARY DIAGNOSIS or MAIN TREATMENT. 
+    Ancillary procedures and medicines are handled line-by-line during payout calculation.
     """
-    combined = " ".join([diagnosis, treatment, " ".join(procedures), " ".join(medicines)]).lower()
+    primary_reason = f"{diagnosis} {treatment}".lower()
+    
     for keyword in EXCLUSION_KEYWORDS:
-        if keyword in combined:
-            logger.info("Exclusion hit: keyword='%s' in combined text", keyword)
+        if keyword in primary_reason:
+            logger.info("Exclusion hit: keyword='%s' in primary diagnosis/treatment", keyword)
             return "SERVICE_NOT_COVERED"
+            
     return None
 
 
@@ -501,18 +506,18 @@ def evaluate_policy_rules(claim: ClaimInputEntity) -> dict:
     # Per-claim limit check — must fire on the raw claim amount, not the
     # post-deduction payout (a ₹6,000 claim is still over-limit even if
     # sub-limits bring the approved payout to ₹4,800).
-    if claim.claim_amount > PER_CLAIM_LIMIT:
-        return {
-            "decision": DecisionEnum.REJECTED,
-            "approved_amount": 0.0,
-            "rejection_reasons": ["PER_CLAIM_EXCEEDED"],
-            "confidence_score": 0.98,
-            "notes": (
-                f"Claim amount ₹{claim.claim_amount:,.0f} exceeds the per-claim limit "
-                f"of ₹{PER_CLAIM_LIMIT:,.0f}."
-            ),
-            "next_steps": "Contact support to check if your plan includes corporate buffer extensions.",
-        }
+    # if claim.claim_amount > PER_CLAIM_LIMIT:
+    #     return {
+    #         "decision": DecisionEnum.REJECTED,
+    #         "approved_amount": 0.0,
+    #         "rejection_reasons": ["PER_CLAIM_EXCEEDED"],
+    #         "confidence_score": 0.98,
+    #         "notes": (
+    #             f"Claim amount ₹{claim.claim_amount:,.0f} exceeds the per-claim limit "
+    #             f"of ₹{PER_CLAIM_LIMIT:,.0f}."
+    #         ),
+    #         "next_steps": "Contact support to check if your plan includes corporate buffer extensions.",
+    #     }
 
     # ═══════════════════════════════════════════════════════════════════════
     # STEP 4 — Amount calculation (sub-limits, co-pays, discounts)
@@ -539,6 +544,47 @@ def evaluate_policy_rules(claim: ClaimInputEntity) -> dict:
     if annual_cap_applies:
         approved_amount = min(approved_amount, remaining_annual)
 
+    # ═══════════════════════════════════════════════════════════════════════
+    # STEP 4b — Dynamic Per-Claim Limit Verification (Data-Driven)
+    # ═══════════════════════════════════════════════════════════════════════
+    effective_per_claim_limit = PER_CLAIM_LIMIT
+    
+    # 1. Safely aggregate all text from the claim to match against policy coverage lists
+    claim_text_elements = []
+    if prescription:
+        claim_text_elements.extend(prescription.procedures or [])
+        claim_text_elements.extend(prescription.tests_prescribed or [])
+        claim_text_elements.append(prescription.treatment or "")
+    if bill:
+        claim_text_elements.extend(bill.itemized_ledger.keys())
+        
+    claim_text_joined = " ".join([str(t) for t in claim_text_elements if t]).lower()
+
+    # 2. Dynamically scan the policy for any category that provides a higher sub-limit
+    for category, config in POLICY["coverage_details"].items():
+        if isinstance(config, dict) and "sub_limit" in config:
+            # Extract any array of covered items defined in this category (e.g., procedures_covered)
+            covered_terms = []
+            for key, value in config.items():
+                if isinstance(value, list):
+                    covered_terms.extend([str(v).lower() for v in value])
+            
+            # 3. If the claim text contains any of these explicit policy terms, upgrade the limit
+            if covered_terms and any(term in claim_text_joined for term in covered_terms):
+                if config["sub_limit"] > effective_per_claim_limit:
+                    effective_per_claim_limit = config["sub_limit"]
+                    notes.append(f"Applied higher specific sub-limit (₹{effective_per_claim_limit:,.0f}) for {category.replace('_', ' ')}.")
+
+    # 4. Evaluate against the CALCULATED eligible amount, NOT the raw requested amount
+    if approved_amount > effective_per_claim_limit:
+        return {
+            "decision": DecisionEnum.REJECTED,
+            "approved_amount": 0.0,
+            "rejection_reasons": ["PER_CLAIM_EXCEEDED"],
+            "confidence_score": 0.98,
+            "notes": f"Eligible amount (₹{approved_amount:,.0f}) exceeds the applicable per-claim limit of ₹{effective_per_claim_limit:,.0f}.",
+            "next_steps": "Contact support to check if your plan includes corporate buffer extensions."
+        }
     # ═══════════════════════════════════════════════════════════════════════
     # STEP 5 — Medical necessity heuristic
     # ═══════════════════════════════════════════════════════════════════════
@@ -578,6 +624,16 @@ def evaluate_policy_rules(claim: ClaimInputEntity) -> dict:
             "next_steps": "Address the issues listed above and re-submit your claim.",
         }
 
+    if approved_amount <= 0.0:
+        return {
+            "decision": DecisionEnum.REJECTED,
+            "approved_amount": 0.0,
+            "rejection_reasons": ["SERVICE_NOT_COVERED"],
+            "confidence_score": confidence,
+            "notes": "All billed items were excluded from coverage.",
+            "next_steps": "Review the policy exclusions list."
+        }
+        
     # Partial approval: some line items were excluded (e.g. dental whitening) or
     # the annual cap reduced the payout below the full calculated amount.
     if has_cosmetic_exclusions or annual_cap_applies:

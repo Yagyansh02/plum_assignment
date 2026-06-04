@@ -1,6 +1,5 @@
 """
 schemas.py — Pydantic domain models for the OPD Claim Adjudication engine.
-
 """
 
 from __future__ import annotations
@@ -115,15 +114,11 @@ class ClaimInputEntity(BaseModel):
 
     claim_amount: float
 
-    # NEW: required for the annual-limit check (Step 4 of adjudication rules).
-    # Should be populated from the DB / claims history before calling the engine.
     ytd_claimed_amount: float = Field(
         default=0.0,
         description="Total amount already claimed by this member in the current policy year.",
     )
 
-    # NEW: required for the 30-day late-submission check.
-    # Pass today's date (or the actual submission timestamp) as YYYY-MM-DD.
     submission_date: Optional[str] = Field(
         default=None,
         description="Date on which the claim was submitted. Defaults to treatment date if omitted.",
@@ -154,13 +149,9 @@ class RawGeminiExtraction(BaseModel):
     """
     Flexible DTO that maps 1-to-1 with what the vision model returns.
     Everything is Optional to prevent crashes when a field is absent.
-    The engine never touches this directly — vision_extractor maps it to
-    ClaimInputEntity first.
     """
 
-    patient_id: Optional[str] = Field(
-        default=None, description="Member / employee ID if visible on documents"
-    )
+
     patient_name: Optional[str] = Field(default=None)
     date_of_treatment: Optional[str] = Field(default=None)
     submission_date: Optional[str] = Field(
@@ -174,6 +165,9 @@ class RawGeminiExtraction(BaseModel):
     doctor_name: Optional[str] = Field(default=None)
     doctor_registration_number: Optional[str] = Field(default=None)
     primary_diagnosis: Optional[str] = Field(default=None)
+    treatment_plan: Optional[str] = Field(
+        default=None, description="The overall treatment plan or therapy recommended"
+    )
     medicines_list: List[str] = Field(default_factory=list)
     procedures_list: List[str] = Field(default_factory=list)
     tests_list: List[str] = Field(default_factory=list)
@@ -182,3 +176,7 @@ class RawGeminiExtraction(BaseModel):
     consultation_cost: Optional[float] = Field(default=None)
     diagnostics_cost: Optional[float] = Field(default=None)
     pharmacy_cost: Optional[float] = Field(default=None)
+    other_billed_items: Dict[str, float] = Field(
+        default_factory=dict,
+        description="Any other itemized charges on the bill (e.g., procedures, room rent, specific therapies) mapped as Item Name -> Amount.",
+    )

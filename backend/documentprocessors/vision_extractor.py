@@ -1,6 +1,5 @@
 """
 vision_extractor.py — Multimodal document extraction via Google Gemini.
-
 """
 
 from __future__ import annotations
@@ -9,10 +8,16 @@ import json
 import logging
 import os
 import time
+import io
+import warnings
 from typing import List, Optional, Tuple
 
+# Silence the google.generativeai FutureWarnings to keep the terminal clean
+warnings.filterwarnings("ignore", category=FutureWarning, module="google.generativeai")
 import google.generativeai as genai
+
 from dotenv import load_dotenv
+from PIL import Image, ImageEnhance
 
 from entities.schemas import (
     ClaimInputEntity,
@@ -35,14 +40,14 @@ if not _api_key:
 
 genai.configure(api_key=_api_key)
 
-# Pinned to the stable free-tier model. Change to "gemini-2.0-flash-exp" if
-# you want to test the latest preview build.
+# Pinned to the stable free-tier model.
 _MODEL_NAME = "gemini-2.5-flash"
 
 # ---------------------------------------------------------------------------
 # Prompt engineering
 # ---------------------------------------------------------------------------
 
+# Note: The word 'SCHEMA' was removed here since we pass it natively now.
 _SYSTEM_PROMPT = """\
 You are a clinical data extraction specialist for Plum Insurance (India).
 You will receive one or more images that together constitute a single OPD claim
@@ -67,9 +72,40 @@ STRICT RULES
 6. Lists (medicines, procedures, tests) should be arrays of plain strings.
    Each element should be one item — do not concatenate multiple items.
 7. Return ONLY the JSON object. No markdown fences, no preamble, no explanation.
-
-SCHEMA
 """
+
+# ---------------------------------------------------------------------------
+# Image Pre-Processing (Enhancement)
+# ---------------------------------------------------------------------------
+
+
+def _enhance_image_for_llm(img_bytes: bytes) -> bytes:
+    """
+    Applies contrast and sharpness filters to medical documents
+    to improve Gemini's OCR accuracy on blurry or faded text.
+    """
+    try:
+        image = Image.open(io.BytesIO(img_bytes))
+
+        if image.mode != "RGB":
+            image = image.convert("RGB")
+
+        enhancer = ImageEnhance.Contrast(image)
+        image = enhancer.enhance(1.5)
+
+        enhancer = ImageEnhance.Sharpness(image)
+        image = enhancer.enhance(2.0)
+
+        output = io.BytesIO()
+        image.save(output, format="JPEG")
+        return output.getvalue()
+
+    except Exception as e:
+        logger.warning(
+            f"Image enhancement failed, falling back to original. Error: {e}"
+        )
+        return img_bytes
+
 
 # ---------------------------------------------------------------------------
 # Retry wrapper for free-tier rate limits
@@ -92,7 +128,10 @@ def _call_gemini_with_retry(
         try:
             response = model.generate_content(
                 contents,
-                generation_config={"response_mime_type": "application/json"},
+                generation_config=genai.GenerationConfig(
+                    response_mime_type="application/json",
+                    response_schema=RawGeminiExtraction,  # Using Native Structured Outputs!
+                ),
             )
             return response.text
         except Exception as exc:
@@ -112,75 +151,68 @@ def _call_gemini_with_retry(
 
 def extract_claim_from_images(
     image_uploads: List[Tuple[bytes, str]],
+    member_id: str,
     ytd_claimed_amount: float = 0.0,
     previous_claims_same_day: int = 0,
 ) -> ClaimInputEntity:
     """
     Extract claim data from a list of (image_bytes, mime_type) tuples and
     return a fully-populated ClaimInputEntity ready for the adjudication engine.
-
-    Additional keyword arguments (ytd_claimed_amount, previous_claims_same_day)
-    must be supplied by the calling layer (fetched from your database) because
-    they are not visible in any document image.
-
-    Raises ValueError only for unrecoverable extraction failures. For partial
-    failures the function returns a sentinel ClaimInputEntity with member_id
-    set to "MISSING_ID" so the engine can route it to MANUAL_REVIEW.
     """
     model = genai.GenerativeModel(_MODEL_NAME)
-
-    schema_json = json.dumps(RawGeminiExtraction.model_json_schema(), indent=2)
-    prompt = _SYSTEM_PROMPT + schema_json
+    prompt = _SYSTEM_PROMPT
 
     # Build multimodal content list: text prompt + image parts
     contents: list = [prompt]
-    for img_bytes, mime_type in image_uploads:
-        contents.append({"mime_type": mime_type, "data": img_bytes})
 
+    # Run uploaded images through the PIL Enhancer
+    for img_bytes, mime_type in image_uploads:
+        if mime_type.startswith("image/"):
+            enhanced_bytes = _enhance_image_for_llm(img_bytes)
+            final_mime_type = "image/jpeg"
+        else:
+            enhanced_bytes = img_bytes
+            final_mime_type = mime_type
+
+        contents.append({"mime_type": final_mime_type, "data": enhanced_bytes})
+
+    # Call LLM (Native JSON parsing guarantees correctness now)
     raw_text = _call_gemini_with_retry(model, contents)
 
     if raw_text is None:
         logger.error(
             "Gemini extraction failed entirely. Returning MANUAL_REVIEW sentinel."
         )
-        return _build_manual_review_sentinel()
+        return _build_manual_review_sentinel(member_id)
 
     # ── Parse & validate raw JSON ────────────────────────────────────────
     try:
-        # Strip any accidental markdown fences before parsing
-        clean_text = raw_text.strip().lstrip("```json").rstrip("```").strip()
-        raw_json = json.loads(clean_text)
+        # Pydantic schema validation happens seamlessly
+        raw_json = json.loads(raw_text)
         logger.info(
             "Gemini raw extraction:\n%s",
             json.dumps(raw_json, indent=2, ensure_ascii=False),
         )
-    except json.JSONDecodeError as exc:
-        logger.error(
-            "Gemini returned non-JSON response: %s\nRaw: %s", exc, raw_text[:500]
-        )
-        return _build_manual_review_sentinel()
-
-    try:
         raw_data = RawGeminiExtraction.model_validate(raw_json)
     except Exception as exc:
-        logger.error("RawGeminiExtraction validation failed: %s", exc)
-        return _build_manual_review_sentinel()
+        logger.error("JSON/RawGeminiExtraction validation failed: %s", exc)
+        return _build_manual_review_sentinel(member_id)
 
     # ── Anti-Corruption Layer: map DTO → domain entities ─────────────────
-    return _map_to_domain_entity(raw_data, ytd_claimed_amount, previous_claims_same_day)
+    return _map_to_domain_entity(
+        raw_data, member_id, ytd_claimed_amount, previous_claims_same_day
+    )
 
 
 def _map_to_domain_entity(
     raw: RawGeminiExtraction,
+    member_id: str,
     ytd_claimed_amount: float,
     previous_claims_same_day: int,
 ) -> ClaimInputEntity:
     """
     Maps the raw LLM output to the strongly-typed domain entity consumed by
     the adjudication engine.
-
-    This is the Anti-Corruption Layer: it isolates the rest of the codebase
-    from any quirks or format changes in the LLM output.
     """
     # ── Prescription ──────────────────────────────────────────────────────
     has_prescription = any(
@@ -189,6 +221,7 @@ def _map_to_domain_entity(
             raw.primary_diagnosis,
             raw.medicines_list,
             raw.doctor_registration_number,
+            raw.treatment_plan,
         ]
     )
 
@@ -198,45 +231,45 @@ def _map_to_domain_entity(
             doctor_name=raw.doctor_name or "Unknown Doctor",
             doctor_reg=raw.doctor_registration_number or "",
             diagnosis=raw.primary_diagnosis or "Unknown Diagnosis",
+            treatment=raw.treatment_plan,  # Mapped treatment payload
             medicines_prescribed=raw.medicines_list or [],
             procedures=raw.procedures_list or [],
             tests_prescribed=raw.tests_list or [],
         )
 
     # ── Bill ─────────────────────────────────────────────────────────────
-
     bill_obj = MedicalBill(
         hospital_name=raw.hospital_name,
         consultation_fee=raw.consultation_cost or 0.0,
         diagnostic_tests=raw.diagnostics_cost or 0.0,
         medicines=raw.pharmacy_cost or 0.0,
         total_amount=raw.total_billed_amount or 0.0,
+        itemized_ledger=raw.other_billed_items or {},  # Mapped dynamic ledger
     )
 
     docs_obj = DocumentAttachments(prescription=prescription_obj, bill=bill_obj)
 
     return ClaimInputEntity(
-        member_id=raw.patient_id or "MISSING_ID",
+        member_id=member_id,
         member_name=raw.patient_name or "Unknown Patient",
         treatment_date=raw.date_of_treatment or "1970-01-01",
         submission_date=raw.submission_date,
         claim_amount=raw.total_billed_amount or 0.0,
         hospital=raw.hospital_name,
         cashless_request=raw.is_cashless or False,
-        # These must be populated from the DB by the calling layer:
         ytd_claimed_amount=ytd_claimed_amount,
         previous_claims_same_day=previous_claims_same_day,
         documents=docs_obj,
     )
 
 
-def _build_manual_review_sentinel() -> ClaimInputEntity:
+def _build_manual_review_sentinel(member_id: str) -> ClaimInputEntity:
     """
     Returns a ClaimInputEntity that will always trigger MANUAL_REVIEW in the
     engine (via the data-integrity guard). Used when extraction fails entirely.
     """
     return ClaimInputEntity(
-        member_id="MISSING_ID",
+        member_id=member_id,
         member_name="Unknown",
         treatment_date="1970-01-01",
         claim_amount=0.0,
