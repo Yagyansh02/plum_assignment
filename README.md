@@ -15,6 +15,32 @@
 
 ---
 
+## ⚠️ Known Limitations & Disclaimers (Please Read)
+
+> **Gemini API — Free Tier Rate Limits**
+>
+> This project uses the **Google Gemini API on the free tier** for AI-powered document extraction. The free tier enforces the following rate limits:
+>
+> | Limit | Value |
+> |-------|-------|
+> | Requests per minute | **15 RPM** |
+> | Requests per day | **20 RPD** |
+> | Tokens per minute | **60,000 TPM** |
+>
+> If you encounter a `429 Too Many Requests` or `ResourceExhausted` error during document upload, the daily quota has likely been exhausted. The quota resets at **midnight Pacific Time (PT)**. The eval harness (`eval_harness.py`) does **not** call the Gemini API — it tests the rule engine directly — so it will always work regardless of API limits.
+
+> **Supabase — Free Tier Database Limits**
+>
+> The PostgreSQL database is hosted on **Supabase's free tier**, which has limited connection pooling (approx. **20 concurrent connections**). This application uses **row-level locking** (`SELECT ... FOR UPDATE`) to prevent concurrent claims from bypassing the ₹50,000 annual limit. Under heavy concurrent load, you may experience:
+>
+> - Slow responses if multiple users submit claims simultaneously (the lock serialises access per member)
+> - Connection timeouts if the pool is saturated
+> - The Supabase free project **pauses after 1 week of inactivity** — if the deployed app returns connection errors, the database may need to be unpaused from the [Supabase dashboard](https://supabase.com/dashboard)
+>
+> These are infrastructure constraints of the free tier and do not reflect the application logic. In a production environment, these would be resolved with a dedicated database instance and higher API tier.
+
+---
+
 ## Demo Video
 Link - https://youtu.be/eO-tIGkFP2U
 

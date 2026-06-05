@@ -2,6 +2,9 @@
 
 > Python-based backend combining Gemini Vision AI extraction with a deterministic 5-step policy rule engine for OPD claim adjudication.
 
+> [!WARNING]
+> **Free Tier Rate Limits.** This project uses the **Gemini API free tier** (15 RPM / 20 requests per day) and a **Supabase free tier** PostgreSQL database (~20 concurrent connections). If you encounter `429 Too Many Requests` errors during document upload, the Gemini daily quota has been exhausted — it resets at midnight PT. The eval harness tests the rule engine directly and does **not** call the Gemini API, so it always works. The database uses row-level locking (`SELECT ... FOR UPDATE`) which may cause slow responses under concurrent load, and the Supabase free project **pauses after 1 week of inactivity** (unpause from the [Supabase dashboard](https://supabase.com/dashboard) if you see connection errors). These are free-tier infrastructure constraints, not application bugs.
+
 ---
 
 ## 📁 Directory Structure

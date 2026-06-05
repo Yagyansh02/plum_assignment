@@ -2,6 +2,9 @@
 
 > Modern Next.js 16 application with Clerk authentication, real-time claim adjudication UI, and a full admin dashboard for monitoring claims and configuring policy terms.
 
+> [!WARNING]
+> **Free Tier Rate Limits.** The backend uses the **Gemini API free tier** (15 RPM / 20 requests per day). If document uploads fail with a timeout or error, the Gemini daily quota may be exhausted — it resets at midnight PT. The **Supabase free tier** database may also experience connection timeouts under concurrent load and **pauses after 1 week of inactivity**. If the deployed app returns connection errors, the database may need to be [unpaused from the Supabase dashboard](https://supabase.com/dashboard).
+
 ---
 
 ## 📁 Directory Structure
