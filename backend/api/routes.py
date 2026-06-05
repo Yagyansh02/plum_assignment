@@ -13,7 +13,6 @@ from database.db import get_session, Member, ClaimRecord
 
 # Processor imports
 from entities.schemas import ClaimInputEntity, DecisionEnum
-from documentprocessors.extractor import extract_claim_from_text
 from documentprocessors.vision_extractor import extract_claim_from_images
 from adjudicationprocessors.engine import evaluate_policy_rules
 
@@ -22,22 +21,6 @@ router = APIRouter()
 
 class UnstructuredClaimRequest(BaseModel):
     raw_text: str
-
-
-@router.post("/adjudicate/text", summary="Process Unstructured Document Text via LLM")
-async def adjudicate_text_claim(payload: UnstructuredClaimRequest):
-    try:
-        extracted_data = extract_claim_from_text(payload.raw_text)
-        adjudication_output = evaluate_policy_rules(extracted_data)
-        return {
-            "status": "success",
-            "extracted_fields": extracted_data.model_dump(),
-            "adjudication_results": adjudication_output,
-        }
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Text Pipeline processing failed: {str(e)}"
-        )
 
 
 @router.post("/adjudicate/documents", summary="Process Medical Images with DB State")
