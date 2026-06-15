@@ -49,7 +49,7 @@ ADMIN_FALLBACK_KEYWORDS: List[str] = [
 # ---------------------------------------------------------------------------
 # Vision Extractor Constants
 # ---------------------------------------------------------------------------
-GEMINI_MODEL_NAME = ""
+GEMINI_MODEL_NAME = "gemini-3.5-flash"
 MAX_RETRIES = 3
 RETRY_DELAYS = [2, 5, 15]
 
